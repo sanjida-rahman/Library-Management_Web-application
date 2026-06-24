@@ -1,0 +1,653 @@
+// ============================================================
+// Library Management System - Frontend logic
+// Talks to the ASP.NET Core Web API (see Backend/LibraryApi)
+// ============================================================
+
+// Change this if your API runs on a different host/port
+const API_BASE = "https://localhost:7001/api";
+
+// ---------- Tab switching ----------
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ---------- Helpers ----------
+function toast(msg, isError = false) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.background = isError ? "#d9534f" : "#2a2e35";
+  t.style.display = "block";
+  setTimeout(() => (t.style.display = "none"), 2500);
+}
+
+async function apiFetch(path, options = {}) {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    if (res.status === 204) return null;
+    return await res.json();
+  } catch (err) {
+    toast(`Error: ${err.message}`, true);
+    throw err;
+  }
+}
+
+function resetForm(prefix) {
+  document.getElementById(`${prefix}-form`).reset();
+  const idField = document.getElementById(`${prefix}-id`);
+  if (idField) idField.value = "";
+}
+
+// ============================================================
+// PUBLISHERS
+// ============================================================
+async function loadPublishers() {
+  const data = await apiFetch("/publishers");
+  const tbody = document.getElementById("publishers-table");
+  tbody.innerHTML = "";
+  const select = document.getElementById("book-publisher");
+  select.innerHTML = '<option value="">-- select publisher --</option>';
+
+  data.forEach(p => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${p.publisher_id}</td>
+        <td>${p.publisher_name}</td>
+        <td>
+          <button class="action-btn edit-btn" onclick="editPublisher(${p.publisher_id}, '${escapeStr(p.publisher_name)}')">Edit</button>
+          <button class="action-btn delete-btn" onclick="deletePublisher(${p.publisher_id})">Delete</button>
+        </td>
+      </tr>`;
+    select.innerHTML += `<option value="${p.publisher_id}">${p.publisher_name}</option>`;
+  });
+}
+
+function editPublisher(id, name) {
+  document.getElementById("publisher-id").value = id;
+  document.getElementById("publisher-name").value = name;
+}
+
+async function deletePublisher(id) {
+  if (!confirm("Delete this publisher?")) return;
+  await apiFetch(`/publishers/${id}`, { method: "DELETE" });
+  toast("Publisher deleted");
+  loadPublishers();
+}
+
+document.getElementById("publisher-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const id = document.getElementById("publisher-id").value;
+  const payload = { publisher_name: document.getElementById("publisher-name").value };
+
+  if (id) {
+    payload.publisher_id = Number(id);
+    await apiFetch(`/publishers/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    toast("Publisher updated");
+  } else {
+    await apiFetch("/publishers", { method: "POST", body: JSON.stringify(payload) });
+    toast("Publisher added");
+  }
+  resetForm("publisher");
+  loadPublishers();
+});
+
+// ============================================================
+// BOOKS
+// ============================================================
+async function loadBooks() {
+  const data = await apiFetch("/books");
+  const tbody = document.getElementById("books-table");
+  tbody.innerHTML = "";
+  const select = document.getElementById("issue-book");
+  select.innerHTML = '<option value="">-- select book --</option>';
+
+  data.forEach(b => {
+    const pubName = b.publisher ? b.publisher.publisher_name : "—";
+    tbody.innerHTML += `
+      <tr>
+        <td>${b.book_id}</td>
+        <td>${b.book_name}</td>
+        <td>${b.isbn}</td>
+        <td>${b.date_of_publish ? b.date_of_publish.substring(0,10) : "—"}</td>
+        <td>${b.genre || "—"}</td>
+        <td>${pubName}</td>
+        <td>
+          <button class="action-btn edit-btn" onclick='editBook(${JSON.stringify(b)})'>Edit</button>
+          <button class="action-btn delete-btn" onclick="deleteBook(${b.book_id})">Delete</button>
+        </td>
+      </tr>`;
+    select.innerHTML += `<option value="${b.book_id}">${b.book_name}</option>`;
+  });
+}
+
+function editBook(b) {
+  document.getElementById("book-id").value = b.book_id;
+  document.getElementById("book-name").value = b.book_name;
+  document.getElementById("book-isbn").value = b.isbn;
+  document.getElementById("book-date").value = b.date_of_publish ? b.date_of_publish.substring(0,10) : "";
+  document.getElementById("book-genre").value = b.genre || "";
+  document.getElementById("book-publisher").value = b.publisher_id;
+}
+
+async function deleteBook(id) {
+  if (!confirm("Delete this book?")) return;
+  await apiFetch(`/books/${id}`, { method: "DELETE" });
+  toast("Book deleted");
+  loadBooks();
+}
+
+document.getElementById("book-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const id = document.getElementById("book-id").value;
+  const payload = {
+    book_name: document.getElementById("book-name").value,
+    isbn: document.getElementById("book-isbn").value,
+    date_of_publish: document.getElementById("book-date").value || null,
+    genre: document.getElementById("book-genre").value || null,
+    publisher_id: Number(document.getElementById("book-publisher").value)
+  };
+
+  if (id) {
+    payload.book_id = Number(id);
+    await apiFetch(`/books/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    toast("Book updated");
+  } else {
+    await apiFetch("/books", { method: "POST", body: JSON.stringify(payload) });
+    toast("Book added");
+  }
+  resetForm("book");
+  loadBooks();
+});
+
+// ============================================================
+// MEMBERS
+// ============================================================
+async function loadMembers() {
+  const data = await apiFetch("/members");
+  const tbody = document.getElementById("members-table");
+  tbody.innerHTML = "";
+  const select = document.getElementById("issue-member");
+  select.innerHTML = '<option value="">-- select member --</option>';
+
+  data.forEach(m => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${m.mem_id}</td>
+        <td>${m.full_name}</td>
+        <td>${m.phone || "—"}</td>
+        <td>${m.email || "—"}</td>
+        <td>${m.address || "—"}</td>
+        <td>
+          <button class="action-btn edit-btn" onclick='editMember(${JSON.stringify(m)})'>Edit</button>
+          <button class="action-btn delete-btn" onclick="deleteMember(${m.mem_id})">Delete</button>
+        </td>
+      </tr>`;
+    select.innerHTML += `<option value="${m.mem_id}">${m.full_name}</option>`;
+  });
+}
+
+function editMember(m) {
+  document.getElementById("member-id").value = m.mem_id;
+  document.getElementById("member-name").value = m.full_name;
+  document.getElementById("member-phone").value = m.phone || "";
+  document.getElementById("member-password").value = m.password;
+  document.getElementById("member-email").value = m.email || "";
+  document.getElementById("member-address").value = m.address || "";
+}
+
+async function deleteMember(id) {
+  if (!confirm("Delete this member?")) return;
+  await apiFetch(`/members/${id}`, { method: "DELETE" });
+  toast("Member deleted");
+  loadMembers();
+}
+
+document.getElementById("member-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const id = document.getElementById("member-id").value;
+  const payload = {
+    full_name: document.getElementById("member-name").value,
+    phone: document.getElementById("member-phone").value || null,
+    password: document.getElementById("member-password").value,
+    email: document.getElementById("member-email").value || null,
+    address: document.getElementById("member-address").value || null
+  };
+
+  if (id) {
+    payload.mem_id = Number(id);
+    await apiFetch(`/members/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    toast("Member updated");
+  } else {
+    await apiFetch("/members", { method: "POST", body: JSON.stringify(payload) });
+    toast("Member added");
+  }
+  resetForm("member");
+  loadMembers();
+});
+
+// ============================================================
+// ADMINS
+// ============================================================
+async function loadAdmins() {
+  const data = await apiFetch("/admins");
+  const tbody = document.getElementById("admins-table");
+  tbody.innerHTML = "";
+  const select = document.getElementById("issue-admin");
+  select.innerHTML = '<option value="">-- select admin --</option>';
+
+  data.forEach(a => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${a.admin_id}</td>
+        <td>${a.full_name}</td>
+        <td>
+          <button class="action-btn edit-btn" onclick='editAdmin(${JSON.stringify(a)})'>Edit</button>
+          <button class="action-btn delete-btn" onclick="deleteAdmin(${a.admin_id})">Delete</button>
+        </td>
+      </tr>`;
+    select.innerHTML += `<option value="${a.admin_id}">${a.full_name}</option>`;
+  });
+}
+
+function editAdmin(a) {
+  document.getElementById("admin-id").value = a.admin_id;
+  document.getElementById("admin-name").value = a.full_name;
+  document.getElementById("admin-password").value = a.password;
+}
+
+async function deleteAdmin(id) {
+  if (!confirm("Delete this admin?")) return;
+  await apiFetch(`/admins/${id}`, { method: "DELETE" });
+  toast("Admin deleted");
+  loadAdmins();
+}
+
+document.getElementById("admin-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const id = document.getElementById("admin-id").value;
+  const payload = {
+    full_name: document.getElementById("admin-name").value,
+    password: document.getElementById("admin-password").value
+  };
+
+  if (id) {
+    payload.admin_id = Number(id);
+    await apiFetch(`/admins/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    toast("Admin updated");
+  } else {
+    await apiFetch("/admins", { method: "POST", body: JSON.stringify(payload) });
+    toast("Admin added");
+  }
+  resetForm("admin");
+  loadAdmins();
+});
+
+// ============================================================
+// BOOK ISSUES
+// ============================================================
+async function loadIssues() {
+  const data = await apiFetch("/issues");
+  const tbody = document.getElementById("issues-table");
+  tbody.innerHTML = "";
+
+  data.forEach(i => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${i.issue_id}</td>
+        <td>${i.book ? i.book.book_name : i.book_id}</td>
+        <td>${i.admin ? i.admin.full_name : i.admin_id}</td>
+        <td>${i.member ? i.member.full_name : i.mem_id}</td>
+        <td>${i.date_of_issue ? i.date_of_issue.substring(0,10) : "—"}</td>
+        <td>${i.return_date ? i.return_date.substring(0,10) : "—"}</td>
+        <td>${i.returned_or_not ? "Yes" : "No"}</td>
+        <td>
+          ${!i.returned_or_not ? `<button class="action-btn return-btn" onclick="markReturned(${i.issue_id})">Mark Returned</button>` : ""}
+          <button class="action-btn delete-btn" onclick="deleteIssue(${i.issue_id})">Delete</button>
+        </td>
+      </tr>`;
+  });
+}
+
+async function markReturned(id) {
+  await apiFetch(`/issues/${id}/return`, { method: "PUT" });
+  toast("Marked as returned");
+  loadIssues();
+}
+
+async function deleteIssue(id) {
+  if (!confirm("Delete this issue record?")) return;
+  await apiFetch(`/issues/${id}`, { method: "DELETE" });
+  toast("Issue record deleted");
+  loadIssues();
+}
+
+document.getElementById("issue-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const payload = {
+    book_id: Number(document.getElementById("issue-book").value),
+    admin_id: Number(document.getElementById("issue-admin").value),
+    mem_id: Number(document.getElementById("issue-member").value),
+    date_of_issue: document.getElementById("issue-date").value,
+    returned_or_not: false
+  };
+  await apiFetch("/issues", { method: "POST", body: JSON.stringify(payload) });
+  toast("Book issued");
+  resetForm("issue");
+  loadIssues();
+});
+
+// ---------- Utils ----------
+function escapeStr(s) {
+  return (s || "").replace(/'/g, "\\'");
+}
+
+// ---------- Initial load ----------
+window.addEventListener("DOMContentLoaded", () => {
+  const session = requireRole("admin");
+  if (!session) return; // redirected to login
+
+  loadPublishers();
+  loadBooks();
+  loadMembers();
+  loadAdmins();
+  loadIssues();
+});
+
+// ============================================================
+// Shared authentication / session helper.
+// Include this BEFORE app.js / member.js on protected pages.
+// ============================================================
+
+const SESSION_KEY = "lms_session";
+
+function getSession() {
+  const raw = localStorage.getItem(SESSION_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function setSession(session) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+// Call at the top of any protected page: requireRole("admin") or requireRole("member")
+function requireRole(role) {
+  const session = getSession();
+  if (!session || session.role !== role) {
+    window.location.href = "login.html";
+    return null;
+  }
+  const welcome = document.getElementById("welcome-text");
+  if (welcome) welcome.textContent = `Hi, ${session.name}`;
+  return session;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const logoutBtn = document.getElementById("logout-btn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      clearSession();
+      window.location.href = "login.html";
+    });
+  }
+});
+
+// ============================================================
+// Login page logic
+// ============================================================
+
+const API_BASE = "https://localhost:7001/api";
+
+// If already logged in, skip straight to the right dashboard
+(function redirectIfLoggedIn() {
+  const session = getSession();
+  if (session && session.role === "admin") window.location.href = "admin-dashboard.html";
+  if (session && session.role === "member") window.location.href = "member-dashboard.html";
+})();
+
+function showError(msg) {
+  const el = document.getElementById("auth-error");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+function clearError() {
+  document.getElementById("auth-error").classList.add("hidden");
+}
+
+// ---------- Role tabs ----------
+document.querySelectorAll(".role-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".role-tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".auth-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(`${btn.dataset.role}-panel`).classList.add("active");
+    clearError();
+  });
+});
+
+// ---------- Member: toggle login / register ----------
+document.getElementById("show-register").addEventListener("click", e => {
+  e.preventDefault();
+  document.getElementById("member-login-form").classList.add("hidden");
+  document.getElementById("member-register-form").classList.remove("hidden");
+  document.getElementById("back-to-login-wrap").classList.remove("hidden");
+  e.target.parentElement.classList.add("hidden");
+  clearError();
+});
+document.getElementById("show-login").addEventListener("click", e => {
+  e.preventDefault();
+  document.getElementById("member-register-form").classList.add("hidden");
+  document.getElementById("back-to-login-wrap").classList.add("hidden");
+  document.getElementById("member-login-form").classList.remove("hidden");
+  document.querySelector("#member-panel .auth-switch").classList.remove("hidden");
+  clearError();
+});
+
+// ---------- Member login ----------
+document.getElementById("member-login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  clearError();
+  const payload = {
+    emailOrName: document.getElementById("member-login-id").value,
+    password: document.getElementById("member-login-password").value
+  };
+  try {
+    const res = await fetch(`${API_BASE}/members/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error("Invalid email/name or password");
+    const data = await res.json();
+    setSession({ role: "member", id: data.mem_id, name: data.full_name });
+    window.location.href = "member-dashboard.html";
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+// ---------- Member registration ----------
+document.getElementById("member-register-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  clearError();
+  const payload = {
+    full_name: document.getElementById("reg-name").value,
+    email: document.getElementById("reg-email").value,
+    phone: document.getElementById("reg-phone").value || null,
+    address: document.getElementById("reg-address").value || null,
+    password: document.getElementById("reg-password").value
+  };
+  try {
+    const res = await fetch(`${API_BASE}/members/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || "Could not create account");
+    }
+    const data = await res.json();
+    setSession({ role: "member", id: data.mem_id, name: data.full_name });
+    window.location.href = "member-dashboard.html";
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+// ---------- Admin login ----------
+document.getElementById("admin-login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  clearError();
+  const payload = {
+    username: document.getElementById("admin-login-id").value,
+    password: document.getElementById("admin-login-password").value
+  };
+  try {
+    const res = await fetch(`${API_BASE}/admins/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error("Invalid admin name or password");
+    const data = await res.json();
+    setSession({ role: "admin", id: data.admin_id, name: data.full_name });
+    window.location.href = "admin-dashboard.html";
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+// ============================================================
+// Member dashboard logic - browse available books, borrow,
+// view own loans, return a book themselves.
+// ============================================================
+
+const API_BASE = "https://localhost:7001/api";
+let SESSION = null;
+
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+  });
+});
+
+function toast(msg, isError = false) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.background = isError ? "#d9534f" : "#2a2e35";
+  t.style.display = "block";
+  setTimeout(() => (t.style.display = "none"), 2500);
+}
+
+async function apiFetch(path, options = {}) {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `HTTP ${res.status}`);
+    }
+    if (res.status === 204) return null;
+    return await res.json();
+  } catch (err) {
+    toast(`Error: ${err.message}`, true);
+    throw err;
+  }
+}
+
+// ---------- Available books ----------
+async function loadAvailable() {
+  const data = await apiFetch("/issues/available-books");
+  const tbody = document.getElementById("available-table");
+  tbody.innerHTML = "";
+
+  if (data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5">No books available right now.</td></tr>`;
+    return;
+  }
+
+  data.forEach(b => {
+    const pubName = b.publisher ? b.publisher.publisher_name : "—";
+    tbody.innerHTML += `
+      <tr>
+        <td>${b.book_name}</td>
+        <td>${b.isbn}</td>
+        <td>${b.genre || "—"}</td>
+        <td>${pubName}</td>
+        <td><button class="action-btn return-btn" onclick="borrowBook(${b.book_id})">Borrow</button></td>
+      </tr>`;
+  });
+}
+
+async function borrowBook(bookId) {
+  await apiFetch("/issues/self-issue", {
+    method: "POST",
+    body: JSON.stringify({ book_id: bookId, mem_id: SESSION.id })
+  });
+  toast("Book borrowed! Check 'My Loans'.");
+  loadAvailable();
+  loadMyLoans();
+}
+
+// ---------- My loans ----------
+async function loadMyLoans() {
+  const data = await apiFetch(`/issues/member/${SESSION.id}`);
+  const tbody = document.getElementById("my-loans-table");
+  tbody.innerHTML = "";
+
+  if (data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5">You haven't borrowed any books yet.</td></tr>`;
+    return;
+  }
+
+  data.forEach(i => {
+    const bookName = i.book ? i.book.book_name : `#${i.book_id}`;
+    tbody.innerHTML += `
+      <tr>
+        <td>${bookName}</td>
+        <td>${i.date_of_issue ? i.date_of_issue.substring(0,10) : "—"}</td>
+        <td>${i.return_date ? i.return_date.substring(0,10) : "—"}</td>
+        <td>${i.returned_or_not ? "Returned" : "On loan"}</td>
+        <td>${!i.returned_or_not ? `<button class="action-btn delete-btn" onclick="returnBook(${i.issue_id})">Return</button>` : "—"}</td>
+      </tr>`;
+  });
+}
+
+async function returnBook(issueId) {
+  await apiFetch(`/issues/${issueId}/self-return`, {
+    method: "PUT",
+    body: JSON.stringify({ mem_id: SESSION.id })
+  });
+  toast("Book returned. Thanks!");
+  loadMyLoans();
+  loadAvailable();
+}
+
+// ---------- Init ----------
+window.addEventListener("DOMContentLoaded", () => {
+  SESSION = requireRole("member");
+  if (!SESSION) return; // redirected to login
+
+  loadAvailable();
+  loadMyLoans();
+});
