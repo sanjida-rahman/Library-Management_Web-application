@@ -1,0 +1,126 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace LibraryApi.Models
+{
+    public class Admin
+    {
+        [Key]
+        public int Admin_id { get; set; }
+
+        [Required]
+        [MaxLength(150)]
+        public string Full_name { get; set; } = string.Empty;
+
+        [Required]
+        [MaxLength(256)]
+        public string Password { get; set; } = string.Empty;
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace LibraryApi.Models
+{
+    public class BookInfo
+    {
+        [Key]
+        public int Book_id { get; set; }
+
+        [Required]
+        [MaxLength(200)]
+        public string Book_name { get; set; } = string.Empty;
+
+        [Required]
+        [MaxLength(20)]
+        public string ISBN { get; set; } = string.Empty;
+
+        public DateTime? Date_of_publish { get; set; }
+
+        [MaxLength(100)]
+        public string? Genre { get; set; }
+
+        [Required]
+        public int Publisher_id { get; set; }
+
+        [ForeignKey(nameof(Publisher_id))]
+        public PublisherInfo? Publisher { get; set; }
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace LibraryApi.Models
+{
+    public class BookIssue
+    {
+        [Key]
+        public int Issue_id { get; set; }
+
+        [Required]
+        public int Book_id { get; set; }
+        [ForeignKey(nameof(Book_id))]
+        public BookInfo? Book { get; set; }
+
+        [Required]
+        public int Admin_id { get; set; }
+        [ForeignKey(nameof(Admin_id))]
+        public Admin? Admin { get; set; }
+
+        [Required]
+        public int Mem_id { get; set; }
+        [ForeignKey(nameof(Mem_id))]
+        public Member? Member { get; set; }
+
+        [Required]
+        public DateTime Date_of_issue { get; set; } = DateTime.UtcNow.Date;
+
+        public DateTime? Return_date { get; set; }
+
+        public bool Returned_or_not { get; set; } = false;
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+
+namespace LibraryApi.Models
+{
+    public class Member
+    {
+        [Key]
+        public int Mem_id { get; set; }
+
+        [Required]
+        [MaxLength(150)]
+        public string Full_name { get; set; } = string.Empty;
+
+        [MaxLength(20)]
+        public string? Phone { get; set; }
+
+        [Required]
+        [MaxLength(256)]
+        public string Password { get; set; } = string.Empty;
+
+        [MaxLength(150)]
+        public string? Email { get; set; }
+
+        [MaxLength(250)]
+        public string? Address { get; set; }
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+
+namespace LibraryApi.Models
+{
+    public class PublisherInfo
+    {
+        [Key]
+        public int Publisher_id { get; set; }
+
+        [Required]
+        [MaxLength(150)]
+        public string Publisher_name { get; set; } = string.Empty;
+    }
+}
