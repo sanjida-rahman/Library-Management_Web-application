@@ -1,0 +1,113 @@
+-- =====================================================================
+-- Library Management System - Database Schema
+-- Generated from ER Diagram (book_info, Publisher_info, Admin, Member, Book_issue)
+-- Target: Microsoft SQL Server
+-- =====================================================================
+
+IF DB_ID('LibraryDB') IS NULL
+    CREATE DATABASE LibraryDB;
+GO
+
+USE LibraryDB;
+GO
+
+-- =====================================================================
+-- Publisher_info  (1) ----- (N) book_info
+-- =====================================================================
+IF OBJECT_ID('dbo.Publisher_info', 'U') IS NOT NULL DROP TABLE dbo.Publisher_info;
+GO
+CREATE TABLE dbo.Publisher_info (
+    Publisher_id    INT IDENTITY(1,1) PRIMARY KEY,
+    Publisher_name  NVARCHAR(150) NOT NULL
+);
+GO
+
+-- =====================================================================
+-- book_info
+-- =====================================================================
+IF OBJECT_ID('dbo.book_info', 'U') IS NOT NULL DROP TABLE dbo.book_info;
+GO
+CREATE TABLE dbo.book_info (
+    Book_id         INT IDENTITY(1,1) PRIMARY KEY,
+    Book_name       NVARCHAR(200) NOT NULL,
+    ISBN            NVARCHAR(20)  NOT NULL UNIQUE,
+    Date_of_publish DATE          NULL,
+    Genre           NVARCHAR(100) NULL,
+    Publisher_id    INT           NOT NULL,
+    CONSTRAINT FK_book_info_Publisher
+        FOREIGN KEY (Publisher_id) REFERENCES dbo.Publisher_info(Publisher_id)
+);
+GO
+
+-- =====================================================================
+-- Admin
+-- =====================================================================
+IF OBJECT_ID('dbo.Admin', 'U') IS NOT NULL DROP TABLE dbo.Admin;
+GO
+CREATE TABLE dbo.Admin (
+    Admin_id    INT IDENTITY(1,1) PRIMARY KEY,
+    Full_name   NVARCHAR(150) NOT NULL,
+    Password    NVARCHAR(256) NOT NULL
+);
+GO
+
+-- =====================================================================
+-- Member
+-- =====================================================================
+IF OBJECT_ID('dbo.Member', 'U') IS NOT NULL DROP TABLE dbo.Member;
+GO
+CREATE TABLE dbo.Member (
+    Mem_id      INT IDENTITY(1,1) PRIMARY KEY,
+    Full_name   NVARCHAR(150) NOT NULL,
+    Phone       NVARCHAR(20)  NULL,
+    Password    NVARCHAR(256) NOT NULL,
+    Email       NVARCHAR(150) NULL,
+    Address     NVARCHAR(250) NULL
+);
+GO
+
+-- =====================================================================
+-- Book_issue  (links book_info, Admin, Member)
+-- Surrogate key Issue_id added since diagram has no explicit PK marked
+-- =====================================================================
+IF OBJECT_ID('dbo.Book_issue', 'U') IS NOT NULL DROP TABLE dbo.Book_issue;
+GO
+CREATE TABLE dbo.Book_issue (
+    Issue_id        INT IDENTITY(1,1) PRIMARY KEY,
+    Book_id         INT NOT NULL,
+    Admin_id        INT NOT NULL,
+    Mem_id          INT NOT NULL,
+    Date_of_issue   DATE NOT NULL DEFAULT (CAST(GETDATE() AS DATE)),
+    Return_date     DATE NULL,
+    Returned_or_not BIT  NOT NULL DEFAULT 0,
+    CONSTRAINT FK_BookIssue_Book
+        FOREIGN KEY (Book_id) REFERENCES dbo.book_info(Book_id),
+    CONSTRAINT FK_BookIssue_Admin
+        FOREIGN KEY (Admin_id) REFERENCES dbo.Admin(Admin_id),
+    CONSTRAINT FK_BookIssue_Member
+        FOREIGN KEY (Mem_id) REFERENCES dbo.Member(Mem_id)
+);
+GO
+
+-- =====================================================================
+-- Sample seed data
+-- =====================================================================
+INSERT INTO dbo.Publisher_info (Publisher_name) VALUES
+('Penguin Random House'), ('HarperCollins'), ('O''Reilly Media');
+
+INSERT INTO dbo.book_info (Book_name, ISBN, Date_of_publish, Genre, Publisher_id) VALUES
+('Clean Code', '9780132350884', '2008-08-01', 'Programming', 3),
+('The Hobbit', '9780547928227', '1937-09-21', 'Fantasy', 1),
+('Sapiens', '9780062316097', '2011-09-04', 'History', 2);
+
+INSERT INTO dbo.Admin (Full_name, Password) VALUES
+('System Admin', 'admin123');
+
+INSERT INTO dbo.Member (Full_name, Phone, Password, Email, Address) VALUES
+('John Doe', '01700000000', 'pass123', 'john@example.com', 'Dhaka, Bangladesh'),
+('Jane Smith', '01800000000', 'pass456', 'jane@example.com', 'Chattogram, Bangladesh');
+
+INSERT INTO dbo.Book_issue (Book_id, Admin_id, Mem_id, Date_of_issue, Return_date, Returned_or_not) VALUES
+(1, 1, 1, '2026-06-01', NULL, 0),
+(2, 1, 2, '2026-05-15', '2026-06-10', 1);
+GO
