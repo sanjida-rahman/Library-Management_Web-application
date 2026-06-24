@@ -1,0 +1,30 @@
+using LibraryApi.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Data
+{
+    public class LibraryDbContext : DbContext
+    {
+        public LibraryDbContext(DbContextOptions<LibraryDbContext> options) : base(options) { }
+
+        public DbSet<BookInfo> BookInfos => Set<BookInfo>();
+        public DbSet<PublisherInfo> PublisherInfos => Set<PublisherInfo>();
+        public DbSet<Admin> Admins => Set<Admin>();
+        public DbSet<Member> Members => Set<Member>();
+        public DbSet<BookIssue> BookIssues => Set<BookIssue>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<BookInfo>().ToTable("book_info");
+            modelBuilder.Entity<PublisherInfo>().ToTable("Publisher_info");
+            modelBuilder.Entity<Admin>().ToTable("Admin");
+            modelBuilder.Entity<Member>().ToTable("Member");
+            modelBuilder.Entity<BookIssue>().ToTable("Book_issue");
+
+            modelBuilder.Entity<BookInfo>()
+                .HasIndex(b => b.ISBN).IsUnique();
+
+            base.OnModelCreating(modelBuilder);
+        }
+    }
+}
