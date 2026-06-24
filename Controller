@@ -1,0 +1,412 @@
+using LibraryApi.Data;
+using LibraryApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Controllers
+{
+    [ApiController]
+    [Route("api/admins")]
+    public class AdminController : ControllerBase
+    {
+        private readonly LibraryDbContext _db;
+        public AdminController(LibraryDbContext db) => _db = db;
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Admin>>> GetAll() =>
+            await _db.Admins.ToListAsync();
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Admin>> GetById(int id)
+        {
+            var item = await _db.Admins.FindAsync(id);
+            return item is null ? NotFound() : item;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Admin>> Create(Admin input)
+        {
+            _db.Admins.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Admin_id }, input);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, Admin input)
+        {
+            if (id != input.Admin_id) return BadRequest();
+            _db.Entry(input).State = EntityState.Modified;
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var item = await _db.Admins.FindAsync(id);
+            if (item is null) return NotFound();
+            _db.Admins.Remove(item);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // Simple login endpoint
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest req)
+        {
+            var admin = await _db.Admins.FirstOrDefaultAsync(a =>
+                a.Full_name == req.Username && a.Password == req.Password);
+            return admin is null ? Unauthorized(new { message = "Invalid credentials" })
+                                  : Ok(new { admin.Admin_id, admin.Full_name });
+        }
+    }
+
+    public class LoginRequest
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
+
+using LibraryApi.Data;
+using LibraryApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Controllers
+{
+    [ApiController]
+    [Route("api/issues")]
+    public class BookIssuesController : ControllerBase
+    {
+        private readonly LibraryDbContext _db;
+        public BookIssuesController(LibraryDbContext db) => _db = db;
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<BookIssue>>> GetAll() =>
+            await _db.BookIssues
+                .Include(i => i.Book)
+                .Include(i => i.Admin)
+                .Include(i => i.Member)
+                .ToListAsync();
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<BookIssue>> GetById(int id)
+        {
+            var item = await _db.BookIssues
+                .Include(i => i.Book).Include(i => i.Admin).Include(i => i.Member)
+                .FirstOrDefaultAsync(i => i.Issue_id == id);
+            return item is null ? NotFound() : item;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<BookIssue>> Create(BookIssue input)
+        {
+            _db.BookIssues.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Issue_id }, input);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, BookIssue input)
+        {
+            if (id != input.Issue_id) return BadRequest();
+            _db.Entry(input).State = EntityState.Modified;
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // Mark a book as returned
+        [HttpPut("{id}/return")]
+        public async Task<IActionResult> MarkReturned(int id)
+        {
+            var item = await _db.BookIssues.FindAsync(id);
+            if (item is null) return NotFound();
+            item.Returned_or_not = true;
+            item.Return_date = DateTime.UtcNow.Date;
+            await _db.SaveChangesAsync();
+            return Ok(item);
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var item = await _db.BookIssues.FindAsync(id);
+            if (item is null) return NotFound();
+            _db.BookIssues.Remove(item);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // ---------- Member self-service endpoints ----------
+
+        // All issue records for one member (their borrowing history)
+        [HttpGet("member/{memId}")]
+        public async Task<ActionResult<IEnumerable<BookIssue>>> GetByMember(int memId) =>
+            await _db.BookIssues
+                .Include(i => i.Book)
+                .Where(i => i.Mem_id == memId)
+                .OrderByDescending(i => i.Date_of_issue)
+                .ToListAsync();
+
+        // Books that are currently NOT on loan (available to borrow)
+        [HttpGet("available-books")]
+        public async Task<ActionResult<IEnumerable<object>>> AvailableBooks()
+        {
+            var issuedBookIds = await _db.BookIssues
+                .Where(i => !i.Returned_or_not)
+                .Select(i => i.Book_id)
+                .ToListAsync();
+
+            var available = await _db.BookInfos
+                .Include(b => b.Publisher)
+                .Where(b => !issuedBookIds.Contains(b.Book_id))
+                .ToListAsync();
+
+            return Ok(available);
+        }
+
+        // A member borrows a book themselves (no admin selection needed in the UI;
+        // the first available admin account is recorded as the processor)
+        [HttpPost("self-issue")]
+        public async Task<ActionResult<BookIssue>> SelfIssue([FromBody] SelfIssueRequest req)
+        {
+            var alreadyOut = await _db.BookIssues.AnyAsync(i => i.Book_id == req.Book_id && !i.Returned_or_not);
+            if (alreadyOut) return Conflict(new { message = "This book is currently unavailable." });
+
+            var anyAdmin = await _db.Admins.FirstOrDefaultAsync();
+            if (anyAdmin is null) return BadRequest(new { message = "No admin account exists to process the loan." });
+
+            var issue = new BookIssue
+            {
+                Book_id = req.Book_id,
+                Mem_id = req.Mem_id,
+                Admin_id = anyAdmin.Admin_id,
+                Date_of_issue = DateTime.UtcNow.Date,
+                Returned_or_not = false
+            };
+
+            _db.BookIssues.Add(issue);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = issue.Issue_id }, issue);
+        }
+
+        // A member returns a book they currently hold
+        [HttpPut("{id}/self-return")]
+        public async Task<IActionResult> SelfReturn(int id, [FromBody] SelfReturnRequest req)
+        {
+            var issue = await _db.BookIssues.FirstOrDefaultAsync(i => i.Issue_id == id && i.Mem_id == req.Mem_id);
+            if (issue is null) return NotFound(new { message = "Loan record not found for this member." });
+            if (issue.Returned_or_not) return BadRequest(new { message = "This book was already returned." });
+
+            issue.Returned_or_not = true;
+            issue.Return_date = DateTime.UtcNow.Date;
+            await _db.SaveChangesAsync();
+            return Ok(issue);
+        }
+    }
+
+    public class SelfIssueRequest
+    {
+        public int Book_id { get; set; }
+        public int Mem_id { get; set; }
+    }
+
+    public class SelfReturnRequest
+    {
+        public int Mem_id { get; set; }
+    }
+}
+
+using LibraryApi.Data;
+using LibraryApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Controllers
+{
+    [ApiController]
+    [Route("api/books")]
+    public class BooksController : ControllerBase
+    {
+        private readonly LibraryDbContext _db;
+        public BooksController(LibraryDbContext db) => _db = db;
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<BookInfo>>> GetAll() =>
+            await _db.BookInfos.Include(b => b.Publisher).ToListAsync();
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<BookInfo>> GetById(int id)
+        {
+            var item = await _db.BookInfos.Include(b => b.Publisher)
+                .FirstOrDefaultAsync(b => b.Book_id == id);
+            return item is null ? NotFound() : item;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<BookInfo>> Create(BookInfo input)
+        {
+            _db.BookInfos.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Book_id }, input);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, BookInfo input)
+        {
+            if (id != input.Book_id) return BadRequest();
+            _db.Entry(input).State = EntityState.Modified;
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var item = await _db.BookInfos.FindAsync(id);
+            if (item is null) return NotFound();
+            _db.BookInfos.Remove(item);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+}
+
+using LibraryApi.Data;
+using LibraryApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Controllers
+{
+    [ApiController]
+    [Route("api/members")]
+    public class MembersController : ControllerBase
+    {
+        private readonly LibraryDbContext _db;
+        public MembersController(LibraryDbContext db) => _db = db;
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Member>>> GetAll() =>
+            await _db.Members.ToListAsync();
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Member>> GetById(int id)
+        {
+            var item = await _db.Members.FindAsync(id);
+            return item is null ? NotFound() : item;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Member>> Create(Member input)
+        {
+            _db.Members.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Mem_id }, input);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, Member input)
+        {
+            if (id != input.Mem_id) return BadRequest();
+            _db.Entry(input).State = EntityState.Modified;
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var item = await _db.Members.FindAsync(id);
+            if (item is null) return NotFound();
+            _db.Members.Remove(item);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // Member registration (self sign-up)
+        [HttpPost("register")]
+        public async Task<ActionResult<Member>> Register(Member input)
+        {
+            var exists = await _db.Members.AnyAsync(m => m.Email == input.Email && input.Email != null);
+            if (exists) return Conflict(new { message = "An account with this email already exists." });
+
+            _db.Members.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Mem_id }, input);
+        }
+
+        // Member login
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] MemberLoginRequest req)
+        {
+            var member = await _db.Members.FirstOrDefaultAsync(m =>
+                (m.Email == req.EmailOrName || m.Full_name == req.EmailOrName) && m.Password == req.Password);
+
+            return member is null
+                ? Unauthorized(new { message = "Invalid credentials" })
+                : Ok(new { member.Mem_id, member.Full_name, member.Email });
+        }
+    }
+
+    public class MemberLoginRequest
+    {
+        public string EmailOrName { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
+
+using LibraryApi.Data;
+using LibraryApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace LibraryApi.Controllers
+{
+    [ApiController]
+    [Route("api/publishers")]
+    public class PublishersController : ControllerBase
+    {
+        private readonly LibraryDbContext _db;
+        public PublishersController(LibraryDbContext db) => _db = db;
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<PublisherInfo>>> GetAll() =>
+            await _db.PublisherInfos.ToListAsync();
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<PublisherInfo>> GetById(int id)
+        {
+            var item = await _db.PublisherInfos.FindAsync(id);
+            return item is null ? NotFound() : item;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<PublisherInfo>> Create(PublisherInfo input)
+        {
+            _db.PublisherInfos.Add(input);
+            await _db.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetById), new { id = input.Publisher_id }, input);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, PublisherInfo input)
+        {
+            if (id != input.Publisher_id) return BadRequest();
+            _db.Entry(input).State = EntityState.Modified;
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var item = await _db.PublisherInfos.FindAsync(id);
+            if (item is null) return NotFound();
+            _db.PublisherInfos.Remove(item);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+}
